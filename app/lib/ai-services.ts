@@ -48,9 +48,58 @@ Then, for each page's image prompt:
 3. Describe the specific scene composition, camera angle, and lighting
 4. Maintain consistency with previous scenes`;
 
+// Add these interfaces before the AIServiceManager class
+interface CharacterPhysicalTraits {
+  height: string;
+  build: string;
+  age?: string;
+  mainColor: string;
+  texture?: string;
+  pattern?: string;
+  distinguishingFeatures: string;
+  eyes: string;
+  expression: string;
+  otherFeatures?: string;
+}
+
+interface CharacterOutfit {
+  clothing: string;
+  accessories?: string;
+  colors?: string;
+}
+
+interface CharacterCharacterization {
+  defaultPose: string;
+  personality: string;
+}
+
+interface Character {
+  name: string;
+  species: string;
+  role: string;
+  physicalTraits: CharacterPhysicalTraits;
+  outfit?: CharacterOutfit;
+  characterization?: CharacterCharacterization;
+}
+
+interface StoryPageOutput {
+  content: string;
+  image: string;
+  imageUrl?: string;
+  characters: string[] | Character[];
+  mood?: string;
+  timeOfDay?: string;
+}
+
+interface StoryOutput {
+  title: string;
+  characters: Character[];
+  pages: StoryPageOutput[];
+}
+
 export class AIServiceManager {
   private textService!: ChatOpenAI | ChatAnthropic;
-  private imageService: any;
+  private imageService: Replicate | null;
   private dalleService?: DallEAPIWrapper;
   private config: AIServiceConfig;
 
@@ -164,14 +213,24 @@ export class AIServiceManager {
         pageCount: options.pageCount,
         ageRange: options.ageRange,
         theme: options.theme || 'none specified',
-      });
+      }) as StoryOutput;
 
       console.log('Received response from AI service');
 
       // Generate images if requested
       if (options.includeImages) {
         console.log('Generating images for story pages...');
-        await this.generateImages(result.pages);
+        const pagesWithCharacters = result.pages.map(page => ({
+          ...page,
+          characters: page.characters.map(charName => {
+            const character = result.characters.find(c => c.name === charName);
+            if (!character) {
+              throw new Error(`Character ${charName} not found in character list`);
+            }
+            return character;
+          })
+        }));
+        await this.generateImages(pagesWithCharacters);
       }
 
       // Return the complete story
@@ -190,14 +249,14 @@ export class AIServiceManager {
     }
   }
 
-  private async generateImages(pages: any[]) {
+  private async generateImages(pages: StoryPageOutput[]) {
     if (!this.config.imageService.apiKey) {
       console.warn('No image service API key provided, skipping image generation');
       return;
     }
 
-    // Store characters at the class level for access during image generation
-    const characters = pages[0]?.characters || [];
+    // Get the characters array from the first page that has Character objects
+    const characters = pages.find(p => p.characters.length > 0 && typeof p.characters[0] !== 'string')?.characters as Character[] ?? [];
 
     switch (this.config.imageService.service) {
       case 'openai':
@@ -219,9 +278,9 @@ export class AIServiceManager {
             const pageIndex = i + batchIndex;
             try {
               // Build character descriptions for this scene
-              const characterDescriptions = page.characters
+              const characterDescriptions = (page.characters as string[])
                 .map((charName: string) => {
-                  const character = characters.find((c: any) => c.name === charName);
+                  const character = characters.find((c) => c.name === charName);
                   if (!character) return '';
 
                   const physicalDesc = [
@@ -301,7 +360,7 @@ Scene description: ${page.image}`;
             const enhancedPrompt = `Digital art in the style of modern children's book illustrations, soft colors, detailed but not overly complex. Scene in a consistent style: ${page.image}`;
             
             console.log(`Generating image ${index + 1}/${pages.length}...`);
-            const output = await this.imageService.run(
+            const output = await this.imageService?.run(
               "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
               {
                 input: {
@@ -311,8 +370,9 @@ Scene description: ${page.image}`;
                   height: 1024,
                 }
               }
-            );
-            return { index, imageUrl: output[0] };
+            ) as string[];
+            
+            return { index, imageUrl: output?.[0] ?? null };
           } catch (error) {
             console.error(`Error generating image ${index + 1}:`, error);
             return { index, imageUrl: null };

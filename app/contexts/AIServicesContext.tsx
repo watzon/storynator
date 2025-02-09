@@ -11,17 +11,6 @@ type AIServicesContextType = {
 
 const AIServicesContext = createContext<AIServicesContextType | undefined>(undefined);
 
-const DEFAULT_CONFIG: AIServiceConfig = {
-  textService: {
-    service: 'openai',
-    apiKey: '',
-  },
-  imageService: {
-    service: 'openai',
-    apiKey: '',
-  },
-};
-
 export function AIServicesProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<AIServiceConfig | null>(null);
 
